@@ -2,9 +2,12 @@
  * Compute Module
  * This module creates either frontend or backend compute resources with:
  * - VM Scale Set for application hosting
- * - Load balancer (Application Gateway for frontend, internal LB for backend)
+ * - Load balancer (internal LB for backend only)
  * - Managed identity for secure authentication
  * - Custom data script for Docker container setup
+ * 
+ * NOTE: Application Gateway is now managed in root main.tf to prevent 
+ * Terraform from resetting the backend pool configuration
  */
 
 locals {
@@ -54,95 +57,7 @@ resource "tls_private_key" "ssh" {
   rsa_bits  = 4096
 }
 
-# Public IP for Load Balancer (Frontend only)
-resource "azurerm_public_ip" "lb" {
-  count               = var.is_frontend ? 1 : 0
-  name                = "${var.resource_name_prefix}-${local.tier_name}-pip"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-  tags                = var.tags
-}
-
-# Application Gateway for Frontend
-resource "azurerm_application_gateway" "frontend" {
-  count               = var.is_frontend ? 1 : 0
-  name                = "${var.resource_name_prefix}-appgw"
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  tags                = var.tags
-
-  sku {
-    name     = "WAF_v2"
-    tier     = "WAF_v2"
-    capacity = 2
-  }
-
-  gateway_ip_configuration {
-    name      = "gateway-ip-config"
-    subnet_id = var.appgw_subnet_id != null ? var.appgw_subnet_id : var.subnet_id
-  }
-
-  frontend_port {
-    name = "http-port"
-    port = 80
-  }
-
-  frontend_ip_configuration {
-    name                 = "frontend-ip-config"
-    public_ip_address_id = azurerm_public_ip.lb[0].id
-  }
-
-  backend_address_pool {
-    name = "backend-pool"
-  }
-
-  backend_http_settings {
-    name                  = "http-settings"
-    cookie_based_affinity = "Disabled"
-    port                  = var.application_port
-    protocol              = "Http"
-    request_timeout       = 60
-    probe_name            = "health-probe"
-  }
-
-  http_listener {
-    name                           = "http-listener"
-    frontend_ip_configuration_name = "frontend-ip-config"
-    frontend_port_name             = "http-port"
-    protocol                       = "Http"
-  }
-
-  request_routing_rule {
-    name                       = "routing-rule"
-    rule_type                  = "Basic"
-    http_listener_name         = "http-listener"
-    backend_address_pool_name  = "backend-pool"
-    backend_http_settings_name = "http-settings"
-    priority                   = 1
-  }
-
-  probe {
-    name                = "health-probe"
-    host                = "127.0.0.1"
-    interval            = 30
-    timeout             = 30
-    unhealthy_threshold = 3
-    protocol            = "Http"
-    port                = var.application_port
-    path                = var.health_probe_path
-  }
-
-  waf_configuration {
-    enabled          = true
-    firewall_mode    = "Prevention"
-    rule_set_type    = "OWASP"
-    rule_set_version = "3.2"
-  }
-}
-
-# Internal Load Balancer for Backend
+# Internal Load Balancer for Backend (only)
 resource "azurerm_lb" "backend" {
   count               = var.is_frontend ? 0 : 1
   name                = "${var.resource_name_prefix}-${local.tier_name}-lb"
@@ -272,12 +187,16 @@ resource "azurerm_linux_virtual_machine_scale_set" "vmss" {
       primary                                      = true
       subnet_id                                    = var.subnet_id
       load_balancer_backend_address_pool_ids       = var.is_frontend ? null : [azurerm_lb_backend_address_pool.backend[0].id]
-      application_gateway_backend_address_pool_ids = var.is_frontend ? [for pool in azurerm_application_gateway.frontend[0].backend_address_pool : pool.id] : null
+      application_gateway_backend_address_pool_ids = null  # App Gateway now managed in main.tf
     }
   }
+
+  depends_on = [
+    azurerm_lb_rule.backend
+  ]
 }
 
-# Auto-scaling settings - moved to a separate resource as required by provider version 4.27.0
+# Auto-scaling settings
 resource "azurerm_monitor_autoscale_setting" "vmss_autoscale" {
   name                = "${var.resource_name_prefix}-${local.tier_name}-autoscale"
   resource_group_name = var.resource_group_name

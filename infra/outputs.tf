@@ -15,12 +15,12 @@ output "vnet_name" {
 
 output "frontend_public_ip" {
   description = "The public IP address of the Application Gateway"
-  value       = var.deploy_compute ? module.frontend[0].public_ip_address : "Compute resources not deployed"
+  value       = var.deploy_compute ? azurerm_public_ip.appgw_pip[0].ip_address : "Compute resources not deployed"
 }
 
 output "application_gateway_name" {
   description = "The name of the Application Gateway"
-  value       = var.deploy_compute ? module.frontend[0].application_gateway_name : "Compute resources not deployed"
+  value       = var.deploy_compute ? azurerm_application_gateway.appgw[0].name : "Compute resources not deployed"
 }
 
 output "backend_internal_lb_ip" {
@@ -104,7 +104,7 @@ output "backend_ssh_private_key" {
 
 output "frontend_url" {
   description = "The URL of the frontend application"
-  value       = var.deploy_compute ? "http://${module.frontend[0].public_ip_address}" : "Frontend not deployed"
+  value       = var.deploy_compute ? "http://${azurerm_public_ip.appgw_pip[0].ip_address}" : "Frontend not deployed"
 }
 
 output "backend_load_balancer_ip" {
@@ -120,4 +120,9 @@ output "resource_group_id" {
 output "keyvault_id" {
   description = "The ID of the Key Vault"
   value       = module.keyvault.key_vault_id
+}
+
+output "application_gateway_id" {
+  description = "The ID of the Application Gateway"
+  value       = var.deploy_compute ? azurerm_application_gateway.appgw[0].id : "Application Gateway not deployed"
 }

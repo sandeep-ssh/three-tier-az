@@ -143,6 +143,44 @@ module "dns" {
   tags                = local.common_tags
 }
 
+# Compute - Backend VMSS (deploy first)
+module "backend" {
+  count  = var.deploy_compute ? 1 : 0
+  source = "./modules/compute"
+
+  resource_group_name  = azurerm_resource_group.main.name
+  location             = var.location
+  resource_name_prefix = local.resource_name_prefix
+  subnet_id            = module.networking.private_subnet_ids[0]
+  appgw_subnet_id      = module.networking.appgw_subnet_id
+  vm_size              = var.backend_vm_size
+  instance_count       = var.backend_instances
+  admin_username       = var.admin_username
+  dockerhub_username   = var.dockerhub_username
+  dockerhub_password   = var.dockerhub_password
+  docker_image         = var.backend_image
+  is_frontend          = false
+  application_port     = 8080
+  health_probe_path    = "/health"
+  key_vault_id         = module.keyvault.key_vault_id
+  backend_load_balancer_ip = null
+  tags                 = local.common_tags
+
+  database_connection = {
+    host     = module.database.server_fqdn
+    port     = var.postgres_db_port
+    username = module.database.administrator_login
+    password = module.database.administrator_password
+    dbname   = var.postgres_db_name
+    sslmode  = var.postgres_db_sslmode
+  }
+
+  depends_on = [
+    module.keyvault,
+    module.database
+  ]
+}
+
 # Compute - Frontend VMSS
 module "frontend" {
   count  = var.deploy_compute ? 1 : 0
@@ -163,50 +201,12 @@ module "frontend" {
   application_port     = 3000
   health_probe_path    = "/"
   key_vault_id         = module.keyvault.key_vault_id
-  # Pass the backend load balancer IP if the backend module has been created
   backend_load_balancer_ip = var.deploy_compute ? module.backend[0].load_balancer_private_ip : null
-  tags                     = local.common_tags
-
-  depends_on = [
-    module.keyvault,
-    # We can't use conditionals in depends_on, so we'll rely on the backend module's count to handle this dependency
-    module.backend
-  ]
-}
-
-# Compute - Backend VMSS
-module "backend" {
-  count  = var.deploy_compute ? 1 : 0
-  source = "./modules/compute"
-
-  resource_group_name  = azurerm_resource_group.main.name
-  location             = var.location
-  resource_name_prefix = local.resource_name_prefix
-  subnet_id            = module.networking.private_subnet_ids[0]
-  vm_size              = var.backend_vm_size
-  instance_count       = var.backend_instances
-  admin_username       = var.admin_username
-  dockerhub_username   = var.dockerhub_username
-  dockerhub_password   = var.dockerhub_password
-  docker_image         = var.backend_image
-  is_frontend          = false
-  application_port     = 8080
-  health_probe_path    = "/health"
-  key_vault_id         = module.keyvault.key_vault_id
   tags                 = local.common_tags
 
-  database_connection = {
-    host     = module.database.server_fqdn
-    port     = var.postgres_db_port
-    username = module.database.administrator_login
-    password = module.database.administrator_password
-    dbname   = var.postgres_db_name
-    sslmode  = var.postgres_db_sslmode
-  }
-
   depends_on = [
     module.keyvault,
-    module.database
+    module.backend
   ]
 }
 
@@ -227,55 +227,96 @@ resource "azurerm_key_vault_access_policy" "backend_policy" {
   ]
 }
 
-# Monitoring Module for VMSS
-# module "monitoring" {
-#   source = "./modules/monitoring"
+# ============================================================================
+# Application Gateway (moved from compute module to prevent Terraform resets)
+# ============================================================================
 
-#   resource_group_name         = azurerm_resource_group.main.name
-#   location                    = var.location
-#   resource_name_prefix        = local.resource_name_prefix
-#   frontend_vmss_id            = var.deploy_compute ? module.frontend[0].vmss_id : null
-#   backend_vmss_id             = var.deploy_compute ? module.backend[0].vmss_id : null
-#   create_frontend_diagnostics = var.deploy_compute
-#   create_backend_diagnostics  = var.deploy_compute
-#   log_analytics_sku           = var.log_analytics_sku
-#   log_retention_days          = var.log_retention_days
-#   alert_email                 = var.alert_email
-#   tags                        = local.common_tags
+# Public IP for Application Gateway
+resource "azurerm_public_ip" "appgw_pip" {
+  count               = var.deploy_compute ? 1 : 0
+  name                = "${local.resource_name_prefix}-appgw-pip"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  tags                = local.common_tags
+}
 
-#   depends_on = [module.frontend, module.backend]
-# }
+# Application Gateway
+resource "azurerm_application_gateway" "appgw" {
+  count               = var.deploy_compute ? 1 : 0
+  name                = "${local.resource_name_prefix}-appgw"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = var.location
+  tags                = local.common_tags
 
-# Key Vault Access Policy for Frontend VMSS
-# Commenting out as they reference the commented-out managed identities
-# resource "azurerm_key_vault_access_policy" "frontend" {
-#   count        = var.deploy_compute ? 1 : 0
-#   key_vault_id = module.keyvault.key_vault_id
-#   tenant_id    = data.azurerm_client_config.current.tenant_id
-#   # Changed to use the frontend user-assigned identity directly
-#   object_id = azurerm_user_assigned_identity.frontend[0].principal_id
-#
-#   secret_permissions = [
-#     "Get",
-#     "List"
-#   ]
-#
-#   depends_on = [module.keyvault, module.frontend]
-# }
+  sku {
+    name     = "WAF_v2"
+    tier     = "WAF_v2"
+    capacity = 2
+  }
 
-# Key Vault Access Policy for Backend VMSS
-# Commenting out as they reference the commented-out managed identities
-# resource "azurerm_key_vault_access_policy" "backend" {
-#   count        = var.deploy_compute ? 1 : 0
-#   key_vault_id = module.keyvault.key_vault_id
-#   tenant_id    = data.azurerm_client_config.current.tenant_id
-#   # Changed to use the backend user-assigned identity directly
-#   object_id = azurerm_user_assigned_identity.backend[0].principal_id
-#
-#   secret_permissions = [
-#     "Get",
-#     "List"
-#   ]
-#
-#   depends_on = [module.keyvault, module.backend]
-# }
+  gateway_ip_configuration {
+    name      = "gateway-ip-config"
+    subnet_id = module.networking.appgw_subnet_id
+  }
+
+  frontend_port {
+    name = "http-port"
+    port = 80
+  }
+
+  frontend_ip_configuration {
+    name                 = "frontend-ip-config"
+    public_ip_address_id = azurerm_public_ip.appgw_pip[0].id
+  }
+
+  backend_address_pool {
+    name = "backend-pool"
+  }
+
+  backend_http_settings {
+    name                  = "http-settings"
+    cookie_based_affinity = "Disabled"
+    port                  = 8080
+    protocol              = "Http"
+    request_timeout       = 60
+    probe_name            = "health-probe"
+  }
+
+  http_listener {
+    name                           = "http-listener"
+    frontend_ip_configuration_name = "frontend-ip-config"
+    frontend_port_name             = "http-port"
+    protocol                       = "Http"
+  }
+
+  request_routing_rule {
+    name                       = "routing-rule"
+    rule_type                  = "Basic"
+    http_listener_name         = "http-listener"
+    backend_address_pool_name  = "backend-pool"
+    backend_http_settings_name = "http-settings"
+    priority                   = 1
+  }
+
+  probe {
+    name                = "health-probe"
+    host                = "10.0.3.4"
+    interval            = 30
+    timeout             = 30
+    unhealthy_threshold = 3
+    protocol            = "Http"
+    port                = 8080
+    path                = "/health"
+  }
+
+  waf_configuration {
+    enabled          = true
+    firewall_mode    = "Prevention"
+    rule_set_type    = "OWASP"
+    rule_set_version = "3.2"
+  }
+
+  depends_on = [module.backend, module.frontend]
+}

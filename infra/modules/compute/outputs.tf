@@ -8,15 +8,7 @@ output "vmss_name" {
   value       = azurerm_linux_virtual_machine_scale_set.vmss.name
 }
 
-output "application_gateway_id" {
-  description = "ID of the Application Gateway (frontend only)"
-  value       = var.is_frontend ? azurerm_application_gateway.frontend[0].id : null
-}
 
-output "application_gateway_name" {
-  description = "Name of the Application Gateway (frontend only)"
-  value       = var.is_frontend ? azurerm_application_gateway.frontend[0].name : null
-}
 
 output "load_balancer_id" {
   description = "ID of the Load Balancer (backend only)"
@@ -33,10 +25,6 @@ output "load_balancer_private_ip" {
   value       = var.is_frontend ? null : azurerm_lb.backend[0].private_ip_address
 }
 
-output "public_ip_address" {
-  description = "Public IP address of the Application Gateway (frontend only)"
-  value       = var.is_frontend ? azurerm_public_ip.lb[0].ip_address : null
-}
 
 output "ssh_private_key" {
   description = "Private key for SSH access to the VMs (for administrative purpose only)"

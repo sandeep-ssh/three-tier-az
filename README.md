@@ -1,4 +1,4 @@
-# 🚀 Deploying a Secure, Scalable Multi-Tier Application on Azure
+# 🚀 Deploying a Secure, Scalable Multi-Tier Application on Azure using Terraform
 
 This project demonstrates the **design, deployment, and operation of a production-grade multi-tier application on Microsoft Azure**, aligned with the **Azure Well-Architected Framework**.
 
@@ -38,20 +38,6 @@ This architecture aligns with Microsoft’s **Azure Well-Architected Framework**
 | **Reliability** | Virtual Machine Scale Sets provide self-healing and horizontal scaling. Azure Load Balancers and Application Gateway health probes ensure traffic is routed only to healthy backend instances. PostgreSQL Flexible Server includes read replica support. |
 | **Performance Efficiency** | Tiered architecture reduces contention and improves latency. Internal load balancing enables efficient east-west traffic. Stateless application containers allow rapid scaling based on demand. |
 | **Cost Optimization** | Right-sized VM SKUs, autoscaling to match traffic patterns, managed database services to reduce operational overhead, and centralized NAT Gateway to control outbound traffic costs. |
-
-The solution implements a **three-tier architecture** with clear separation of concerns:
-
-- **Web Tier**  
-  Internet-facing entry point protected by Azure Application Gateway (WAF-enabled).
-
-- **Application Tier**  
-  Horizontally scalable backend services running in Docker on Virtual Machine Scale Sets (VMSS).
-
-- **Database Tier**  
-  Azure PostgreSQL Flexible Server deployed in private subnets with read replica support.
-
-All tiers are isolated using **private networking**, **strict NSGs**, and **controlled ingress/egress**, following zero-trust networking principles.
-
 ---
 
 ### 🔐 Security
